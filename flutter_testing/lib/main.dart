@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 void main() => runApp(const MyApp());
@@ -37,7 +39,7 @@ class ImageSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Image.network(
-      'https://githubusercontent.com',
+      'https://raw.githubusercontent.com',
       width: 600,
       height: 240,
       fit: BoxFit.cover,
