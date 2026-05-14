@@ -3,117 +3,26 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:flutter/services.dart' show rootBundle, ByteData;
+
+// Initial database setup
+Future<Database> openPrePopulatedDatabase() async {
+  var databasesPath = await getDatabasesPath();
+  var path = join(databasesPath, "db.db");
+
+  // Copy database from assets
+    await Directory(dirname(path)).create(recursive: true);
+    ByteData data = await rootBundle.load(join("assets", "db.db"));
+    List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    await File(path).writeAsBytes(bytes, flush: true);
+  return await openDatabase(path);
+}
 
 void main() async {
   // Avoid errors caused by flutter upgrade.
   // Importing 'package:flutter/widgets.dart' is required.
   WidgetsFlutterBinding.ensureInitialized();
-  // Open the database and store the reference.
-  final database = openDatabase(
-    // Set the path to the database. Note: Using the `join` function from the
-    // `path` package is best practice to ensure the path is correctly
-    // constructed for each platform.
-    join(await getDatabasesPath(), 'doggie_database.db'),
-    // When the database is first created, create a table to store dogs.
-    onCreate: (db, version) {
-      // Run the CREATE TABLE statement on the database.
-      return db.execute(
-        'CREATE TABLE test(id INTEGER PRIMARY KEY, name TEXT, age INTEGER)',
-      );
-    },
-    // Set the version. This executes the onCreate function and provides a
-    // path to perform database upgrades and downgrades.
-    version: 1,
-  );
-
-  // Define a function that inserts dogs into the database
-  Future<void> insertDog(Dog dog) async {
-    // Get a reference to the database.
-    final db = await database;
-
-    // Insert the Dog into the correct table. You might also specify the
-    // `conflictAlgorithm` to use in case the same dog is inserted twice.
-    //
-    // In this case, replace any previous data.
-    await db.insert(
-      'dogs',
-      dog.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    
-  }
-
-  // A method that retrieves all the dogs from the dogs table.
-  Future<List<Dog>> dogs() async {
-    // Get a reference to the database.
-    final db = await database;
-
-    // Query the table for all the dogs.
-    final List<Map<String, Object?>> dogMaps = await db.query('dogs');
-
-    // Convert the list of each dog's fields into a list of `Dog` objects.
-    return [
-      for (final {'id': id as int, 'name': name as String, 'age': age as int}
-          in dogMaps)
-        Dog(id: id, name: name, age: age),
-    ];
-  }
-
-  Future<void> updateDog(Dog dog) async {
-    // Get a reference to the database.
-    final db = await database;
-
-    // Update the given Dog.
-    await db.update(
-      'dogs',
-      dog.toMap(),
-      // Ensure that the Dog has a matching id.
-      where: 'id = ?',
-      // Pass the Dog's id as a whereArg to prevent SQL injection.
-      whereArgs: [dog.id],
-    );
-  }
-
-  Future<void> deleteDog(int id) async {
-    // Get a reference to the database.
-    final db = await database;
-
-    // Remove the Dog from the database.
-    await db.delete(
-      'dogs',
-      // Use a `where` clause to delete a specific dog.
-      where: 'id = ?',
-      // Pass the Dog's id as a whereArg to prevent SQL injection.
-      whereArgs: [id],
-    );
-  }
-
-  // Create a Dog and add it to the dogs table
-  var fido = Dog(id: 0, name: 'Fido', age: 35);
-
-  await insertDog(fido);
-
-  // Now, use the method above to retrieve all the dogs.
-  print(await dogs()); // Prints a list that include Fido.
-
-  // Update Fido's age and save it to the database.
-  fido = Dog(id: fido.id, name: fido.name, age: fido.age + 7);
-  await updateDog(fido);
-
-  // Print the updated results.
-  print(await dogs()); // Prints Fido with age 42.
-
-  // Delete Fido from the database.
-  await deleteDog(fido.id);
-
-  // Print the list of dogs (empty).
-  print(await dogs());
-
-  @override
-  SqliteAppState createState() => SqliteAppState();
-
   
   runApp(SqliteApp());
 }
@@ -128,72 +37,63 @@ class SqliteApp extends StatefulWidget {
 
 class SqliteAppState extends State<SqliteApp> {
   int? selectedId;
-  final textController = TextEditingController();
+  int spot = 0;
+
+  // State variable for the card title
+  String cardTitle = '';
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(
-          title: TextField(
-            controller: textController,
-          ),
-        ),
         body: Center(
-          child: FutureBuilder<List<Grocery>>(
-              future: DatabaseHelper.instance.getGroceries(),
-              builder: (BuildContext context,
-                  AsyncSnapshot<List<Grocery>> snapshot) {
-                if (!snapshot.hasData) {
-                  return Center(child: Text('Loading...'));
-                }
-                return snapshot.data!.isEmpty
-                    ? Center(child: Text('No Groceries in List.'))
-                    : ListView(
-                        children: snapshot.data!.map((grocery) {
-                          return Center(
-                            child: Card(
-                              color: selectedId == grocery.id
-                                  ? Colors.white70
-                                  : Colors.white,
-                              child: ListTile(
-                                title: Text(grocery.name),
-                                onTap: () {
-                                  setState(() {
-                                    if (selectedId == null) {
-                                      textController.text = grocery.name;
-                                      selectedId = grocery.id;
-                                    } else {
-                                      textController.text = '';
-                                      selectedId = null;
-                                    }
-                                  });
-                                },
-                                onLongPress: () {
-                                  setState(() {
-                                    DatabaseHelper.instance.remove(grocery.id!);
-                                  });
-                                },
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      );
-              }),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              FutureBuilder<List<Story>>(
+                future: openPrePopulatedDatabase().then((db) async {
+                  final List<Map<String, Object?>> storiesMaps = await db.query('Pages');
+                  return [
+                    for (final {'Number': Number as int, 'PageContent': PageContent as String, 'Heart': Heart as int}
+                        in storiesMaps)
+                      Story(Number: Number, PageContent: PageContent, Heart: Heart),
+                  ];
+                }),
+                builder: (BuildContext context,
+                  AsyncSnapshot<List<Story>> snapshot) {
+                    if (!snapshot.hasData) {
+                      return Center(child: Text('Loading...'));
+                    }
+                    // Set initial title
+                    if (cardTitle.isEmpty) {
+                      cardTitle = snapshot.data!.first.PageContent;
+                    }
+                    spot++;
+                    return snapshot.data!.isEmpty ? Center(child: Text('No Stories in List.')) : Card(
+                      color: selectedId == snapshot.data!.first.Number ? Colors.grey : Colors.white,
+                      child: ListTile(
+                        title: Text(cardTitle),
+                        onTap: () {
+                          setState(() {
+                          // Change title using database row
+                          spot++;
+                          cardTitle = snapshot.data![spot].PageContent;
+
+                          selectedId = snapshot.data![spot].Number;
+                          });
+                        },
+                      ),
+                    );
+                  },
+              ),
+            ],
+          ),
         ),
         floatingActionButton: FloatingActionButton(
           child: Icon(Icons.save),
           onPressed: () async {
-            selectedId != null
-                ? await DatabaseHelper.instance.update(
-                    Grocery(id: selectedId, name: textController.text),
-                  )
-                : await DatabaseHelper.instance.add(
-                    Grocery(name: textController.text),
-                  );
             setState(() {
-              textController.clear();
-              selectedId = null;
+
             });
           },
         ),
@@ -202,95 +102,33 @@ class SqliteAppState extends State<SqliteApp> {
   }
 }
 
+class Story {
+  final int Number;
+  final String PageContent;
+  final int Heart;
 
-class Grocery {
-  final int? id;
-  final String name;
+  Story({required this.Number, required this.PageContent, required this.Heart});
 
-  Grocery({this.id, required this.name});
+  // Convert a Story into a Map. The keys must correspond to the names of the
+  // columns in the database.
 
-  factory Grocery.fromMap(Map<String, dynamic> json) => Grocery(
-        id: json['id'],
-        name: json['name'],
+  factory Story.fromMap(Map<String, dynamic> json) => Story(
+        Number: json['Number'],
+        PageContent: json['PageContent'],
+        Heart: json['Heart'],
       );
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
-      'name': name,
+      'Number': Number,
+      'PageContent': PageContent,
+      'Heart': Heart,
     };
   }
-}
-
-class DatabaseHelper {
-  DatabaseHelper._privateConstructor();
-  static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
-
-  static Database? _database;
-  Future<Database> get database async => _database ??= await _initDatabase();
-
-  Future<Database> _initDatabase() async {
-    Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = join(documentsDirectory.path, 'groceries.db');
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _onCreate,
-    );
-  }
-
-  Future _onCreate(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE groceries(
-          id INTEGER PRIMARY KEY,
-          name TEXT
-      )
-      ''');
-  }
-
-  Future<List<Grocery>> getGroceries() async {
-    Database db = await instance.database;
-    var groceries = await db.query('groceries', orderBy: 'name');
-    List<Grocery> groceryList = groceries.isNotEmpty
-        ? groceries.map((c) => Grocery.fromMap(c)).toList()
-        : [];
-    return groceryList;
-  }
-
-  Future<int> add(Grocery grocery) async {
-    Database db = await instance.database;
-    return await db.insert('groceries', grocery.toMap());
-  }
-
-  Future<int> remove(int id) async {
-    Database db = await instance.database;
-    return await db.delete('groceries', where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<int> update(Grocery grocery) async {
-    Database db = await instance.database;
-    return await db.update('groceries', grocery.toMap(),
-        where: "id = ?", whereArgs: [grocery.id]);
-  }
-}
-
-class Dog {
-  final int id;
-  final String name;
-  final int age;
-
-  Dog({required this.id, required this.name, required this.age});
-
-  // Convert a Dog into a Map. The keys must correspond to the names of the
-  // columns in the database.
-  Map<String, Object?> toMap() {
-    return {'id': id, 'name': name, 'age': age};
-  }
-
   // Implement toString to make it easier to see information about
-  // each dog when using the print statement.
+  // each story when using the print statement.
   @override
   String toString() {
-    return 'Dog{id: $id, name: $name, age: $age}';
+    return 'Story{Number: $Number, PageContent: $PageContent, Heart: $Heart}';
   }
 }
